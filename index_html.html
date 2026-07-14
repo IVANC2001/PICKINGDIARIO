@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Interactivo de Picking</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght=300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        roboto: ['Roboto', 'sans-serif'],
+                    },
+                    colors: {
+                        darkBg: '#111333',     
+                        cardBg: '#1b1d47',     
+                        accentCyan: '#00f0ff',   
+                        accentGreen: '#00ffaa',  
+                        accentBlue: '#2f45ff',   
+                        accentPink: '#d946ef',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #111333;
+            color: #f1f5f9;
+        }
+
+        .fade-scroll {
+            mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
+            overflow-y: auto;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            max-height: 480px; 
+        }
+
+        .fade-scroll::-webkit-scrollbar { width: 4px; }
+        .fade-scroll::-webkit-scrollbar-track { background: transparent; }
+        .fade-scroll::-webkit-scrollbar-thumb { background: #3b3f8c; border-radius: 10px; }
+
+        .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -5px rgba(0, 240, 255, 0.15); }
+    </style>
+</head>
+<body class="font-roboto min-h-screen flex flex-col overflow-x-hidden">
+
+    <header class="bg-cardBg border-b border-slate-800 p-4 sticky top-0 z-50 shadow-md">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <img src="logo chavez 2.png" alt="Farmacias Chavez" class="h-10 filter brightness-0 invert object-contain" onerror="this.src='https://placehold.co/100x40/111333/ffffff?text=Logo+Aqui'" />
+                <h1 class="text-2xl font-bold text-white tracking-wide border-l border-slate-700 pl-3">Picking Cedis <span class="text-accentCyan font-light">2026</span></h1>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row items-center gap-5 bg-darkBg p-2.5 rounded-xl border border-slate-800 w-full md:w-auto">
+                <div id="syncTimeContainer" class="hidden sm:flex flex-col items-end border-r border-slate-700 pr-4 justify-center text-right">
+                    <span class="text-[11px] text-slate-400 uppercase tracking-widest font-semibold mb-0.5">Última Sincronización</span>
+                    <div class="flex items-baseline gap-2">
+                        <span id="kpi-update-time" class="text-xl md:text-2xl font-extrabold text-accentCyan tracking-tight">--:--:--</span>
+                        <span id="kpi-update-date" class="text-xs md:text-sm text-slate-300 font-medium">--/--/----</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                    <label id="fileStatusLabel" class="text-sm text-slate-400 font-medium px-1 whitespace-nowrap">Origen:</label>
+                    <button id="loadFileBtn" class="text-sm font-semibold bg-accentCyan text-darkBg py-2 px-4 rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        <span id="btnText">Sincronizando...</span>
+                    </button>
+                    <input type="file" id="excelFileFallback" accept=".xlsx, .xls, .csv" class="hidden"/>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow pt-2 md:pt-3 lg:pt-4 pb-4 md:pb-6 lg:pb-8 px-4 md:px-6 lg:px-8 max-w-[1400px] mx-auto w-full flex flex-col xl:flex-row gap-6 relative">
+        
+        <div id="emptyState" class="w-full flex flex-col items-center justify-center py-20 text-slate-500 col-span-full absolute inset-0 mt-20 z-0">
+            <svg class="w-20 h-20 mb-4 animate-spin text-accentCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <h2 id="loadingText" class="text-xl font-medium text-slate-400">Conectando con Google Drive...</h2>
+            <p class="text-sm mt-2 max-w-md text-center">Descargando y procesando la última versión de la plantilla de Picking.</p>
+        </div>
+
+        <div id="dashboardContent" class="flex-grow flex flex-col gap-3 opacity-0 transition-opacity duration-500 hidden z-10">
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-12 gap-4">
+                <div class="card-hover bg-cardBg p-4 rounded-2xl border border-slate-800 relative overflow-hidden flex flex-col justify-between xl:col-span-2">
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">Total Filas Objetivo</p>
+                    <h3 id="kpi-target" class="text-[32px] font-bold text-white mb-1 leading-tight">0</h3>
+                    <p class="text-[11px] text-slate-500">Meta global requerida</p>
+                </div>
+
+                <div class="card-hover bg-cardBg p-4 rounded-2xl border border-slate-800 relative overflow-hidden flex flex-col justify-between xl:col-span-2">
+                    <div class="absolute top-0 right-0 w-16 h-16 bg-accentCyan opacity-5 rounded-bl-full"></div>
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">Filas Pickeadas</p>
+                    <h3 id="kpi-picked" class="text-[32px] font-bold text-accentCyan mb-1 leading-tight">0</h3>
+                    <p class="text-[11px] text-slate-500">Total procesado diario</p>
+                </div>
+                
+                <div class="card-hover bg-cardBg p-4 rounded-2xl border border-slate-800 relative overflow-hidden flex flex-col justify-between xl:col-span-2">
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">Filas Restantes</p>
+                    <h3 id="kpi-remaining" class="text-[32px] font-bold text-accentPink mb-1 leading-tight">0</h3>
+                    <p class="text-[11px] text-slate-500">Pendientes diario</p>
+                </div>
+                
+                <div class="card-hover bg-cardBg p-4 rounded-2xl border border-slate-800 relative overflow-hidden flex flex-col justify-between xl:col-span-2">
+                    <div class="absolute top-0 right-0 w-16 h-16 bg-accentGreen opacity-5 rounded-bl-full"></div>
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">% Cumplimiento</p>
+                    <h3 id="kpi-compliance" class="text-[32px] font-bold text-accentGreen mb-1 leading-tight">0%</h3>
+                    <p class="text-[11px] text-slate-500">Progreso meta</p>
+                </div>
+
+                <div class="card-hover bg-cardBg p-4 rounded-2xl border border-slate-800 relative overflow-hidden flex flex-col justify-between bg-gradient-to-b from-cardBg to-darkBg/40 sm:col-span-2 lg:col-span-4 xl:col-span-4">
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1 text-accentCyan font-bold">Top 3 Picking</p>
+                    <div id="kpi-top3-container" class="space-y-1.5 my-1">
+                        <div class="text-xs text-slate-400 italic">Esperando datos...</div>
+                    </div>
+                    <p id="kpi-top3-scope" class="text-[11px] text-slate-500">Rendimiento según filtro</p>
+                </div>
+            </div>
+
+            <div class="bg-cardBg p-4 rounded-xl border border-slate-800 flex flex-col lg:flex-row justify-between items-center gap-4">
+                <span class="text-sm font-medium text-slate-300 flex items-center gap-2 self-start lg:self-auto">
+                    <svg class="w-5 h-5 text-accentCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
+                    Filtros de Búsqueda
+                </span>
+                <div class="flex flex-col sm:flex-row gap-3 w-full lg:w-auto flex-grow justify-end">
+                    <select id="monthFilter" class="bg-darkBg border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-accentCyan w-full sm:w-44">
+                        <option value="all">Todo el Año</option>
+                    </select>
+                    <select id="areaFilter" class="bg-darkBg border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-accentCyan w-full sm:w-44">
+                        <option value="all">Todas las Áreas</option>
+                    </select>
+                    <input type="text" id="searchInput" placeholder="Buscar operador o área..." class="bg-darkBg border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-accentCyan w-full sm:max-w-xs">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 bg-cardBg p-6 rounded-2xl border border-slate-800 flex flex-col justify-between relative overflow-hidden min-h-[350px]">
+                    <div class="absolute top-0 right-0 w-64 h-64 bg-accentCyan opacity-5 rounded-full blur-3xl -mr-20 -mt-20"></div>
+                    
+                    <div class="mb-4 z-10 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                        <div>
+                            <h3 id="barChartTitle" class="text-xl font-medium text-white mb-1">Producción de Picking</h3>
+                            <p id="barChartSubtitle" class="text-sm text-slate-400">Total de filas procesadas</p>
+                        </div>
+                        <div class="bg-darkBg/60 border border-slate-800/80 px-4 py-1.5 rounded-xl flex items-center gap-2 self-start sm:self-auto shadow-inner">
+                            <span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">TOTAL FILAS:</span>
+                            <span id="barChartTotalRows" class="text-base font-extrabold text-accentPink tracking-wide">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="relative w-full flex-grow min-h-[240px] z-10">
+                        <canvas id="barChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-cardBg p-6 rounded-2xl border border-slate-800 flex flex-col">
+                    <h3 class="text-lg font-medium text-white mb-2 text-center z-10">Progreso General</h3>
+                    <div class="relative flex-grow flex items-center justify-center min-h-[220px]">
+                        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-6 z-10">
+                            <span class="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Total</span>
+                            <span id="inner-doughnut-text" class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-accentCyan to-accentGreen">0%</span>
+                        </div>
+                        <div class="relative w-full h-full z-0">
+                            <canvas id="doughnutChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <aside id="rightPanel" class="w-full xl:w-96 flex-shrink-0 bg-cardBg rounded-2xl border border-slate-800 flex flex-col opacity-0 transition-opacity duration-500 hidden xl:flex z-10">
+            <div class="p-6 pb-3 border-b border-slate-800">
+                <h3 class="text-lg font-medium text-white flex items-center gap-2">
+                    <svg class="w-5 h-5 text-accentCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    Ranking por Áreas
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">Operadores ordenados por productividad y área</p>
+            </div>
+            
+            <div class="flex-grow relative px-4">
+                <ul id="materialsList" class="fade-scroll space-y-4 h-full"></ul>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        const GOOGLE_DRIVE_EXCEL_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSN5DjUJifx8IOmjWYqHHx-4-E0duiPcdfajycJAggnnoT3RGJW05SZLEr5wURTQBjwUEAHQVMyoJnV/pub?output=xlsx";
+
+        // URL del Web App de Google Apps Script (reemplazar por la URL /exec de tu implementación desplegada)
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/exec";
+
+        let rawData = { kpis: null, users: null };
+        let initialUsersArray = [];
+        let doughnutChartInstance = null;
+        let barChartInstance = null;
+        let doughnutRotation = 0;
+        let doughnutAnimationInterval = null;
+        
+        let autoScrollInterval = null;
+        let isHoveringList = false;
+
+        const areaColorsPool = [
+            { text: 'text-accentCyan', bg: 'bg-accentCyan/10', border: 'border-accentCyan/30', hex: '#00f0ff' },
+            { text: 'text-accentGreen', bg: 'bg-accentGreen/10', border: 'border-accentGreen/30', hex: '#00ffaa' },
+            { text: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-500/30', hex: '#22d3ee' },
+            { text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-500/30', hex: '#34d399' },
+            { text: 'text-indigo-400', bg: 'bg-indigo-400/10', border: 'border-indigo-500/30', hex: '#818cf8' },
+            { text: 'text-sky-400', bg: 'bg-sky-400/10', border: 'border-sky-500/30', hex: '#38bdf8' }
+        ];
+        let areaColorMapping = {};
+
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Roboto', sans-serif";
+
+        document.getElementById('loadFileBtn').addEventListener('click', () => {
+            document.getElementById('excelFileFallback').click();
+        });
+        document.getElementById('excelFileFallback').addEventListener('change', handleFileFallback);
+        
+        document.getElementById('searchInput').addEventListener('input', triggerFilter);
+        document.getElementById('monthFilter').addEventListener('change', triggerFilter);
+        document.getElementById('areaFilter').addEventListener('change', triggerFilter);
+
+        const listContainer = document.getElementById('materialsList');
+        listContainer.addEventListener('mouseenter', () => isHoveringList = true);
+        listContainer.addEventListener('mouseleave', () => isHoveringList = false);
+
+        window.addEventListener('DOMContentLoaded', fetchExcelFromAppsScript);
+
+        async function fetchExcelFromAppsScript() {
+            try {
+                const response = await fetch(APPS_SCRIPT_URL);
+                if (!response.ok) throw new Error('Error en la red.');
+                // El Web App de Apps Script devuelve el XLSX codificado en base64
+                const base64 = (await response.text()).trim();
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                processExcelBuffer(bytes.buffer);
+
+                document.getElementById('fileStatusLabel').innerText = "Origen:";
+                document.getElementById('btnText').innerText = "Apps Script";
+                document.getElementById('loadFileBtn').classList.replace('bg-accentCyan', 'bg-accentGreen');
+            } catch (error) {
+                console.error("Falla en fetch automático:", error);
+                document.getElementById('loadingText').innerText = "Sincronización deshabilitada (Cargar Manual)";
+                document.getElementById('btnText').innerText = "Subir Manual";
+            }
+        }
+
+        // ... [El resto de las funciones de soporte se mantienen intactas] ...
+        function triggerFilter() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const selectedMonth = document.getElementById('monthFilter').value;
+            const selectedArea = document.getElementById('areaFilter').value;
+            renderDashboard(searchTerm, selectedMonth, selectedArea);
+        }
+
+        function handleFileFallback(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(evt) { 
+                processExcelBuffer(evt.target.result); 
+                e.target.value = ''; 
+            };
+            reader.readAsArrayBuffer(file);
+            document.getElementById('fileStatusLabel').innerText = "Origen:";
+            document.getElementById('btnText').innerText = "Local";
+        }
+
+        function processExcelBuffer(buffer) {
+            const data = new Uint8Array(buffer);
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            let sheetDiarioName = workbook.SheetNames.find(n => n.toLowerCase().includes('diario')) || workbook.SheetNames[0];
+            const worksheetDiario = workbook.Sheets[sheetDiarioName];
+            const jsonDiario = XLSX.utils.sheet_to_json(worksheetDiario, {header: 1});
+            
+            let sheetMesName = workbook.SheetNames.find(n => n.toLowerCase().includes('mes'));
+            if (!sheetMesName && workbook.SheetNames.length > 1) sheetMesName = workbook.SheetNames[1];
+            
+            if (sheetMesName) {
+                const worksheetMes = workbook.Sheets[sheetMesName];
+                initialUsersArray = XLSX.utils.sheet_to_json(worksheetMes);
+                
+                let areaIndex = 0;
+                areaColorMapping = {};
+                initialUsersArray.forEach(row => {
+                    let area = row['Area'] || row['Área'];
+                    if (area && !areaColorMapping[area]) {
+                        areaColorMapping[area] = areaColorsPool[areaIndex % areaColorsPool.length];
+                        areaIndex++;
+                    }
+                });
+                
+                populateMonthFilter(initialUsersArray);
+                populateAreaFilter(initialUsersArray);
+            }
+
+            parseData(jsonDiario);
+            updateTimestampHeader(); 
+        }
+
+        function updateTimestampHeader() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            
+            document.getElementById('kpi-update-time').innerText = timeStr;
+            document.getElementById('kpi-update-date').innerText = dateStr;
+            document.getElementById('syncTimeContainer').classList.remove('hidden');
+        }
+
+        function populateMonthFilter(data) {
+            const select = document.getElementById('monthFilter');
+            const currentSelected = select.value;
+            select.innerHTML = '<option value="all">Todo el Año</option>';
+            const meses = new Set();
+            data.forEach(row => {
+                let mes = row['mes'] || row['Mes'];
+                if (mes && mes.trim() !== '') meses.add(mes.trim());
+            });
+            meses.forEach(mes => {
+                const opt = document.createElement('option');
+                opt.value = mes;
+                opt.innerText = mes.charAt(0).toUpperCase() + mes.slice(1);
+                select.appendChild(opt);
+            });
+            if([...meses].includes(currentSelected)) select.value = currentSelected;
+        }
+
+        function populateAreaFilter(data) {
+            const select = document.getElementById('areaFilter');
+            const currentSelected = select.value;
+            select.innerHTML = '<option value="all">Todas las Áreas</option>';
+            const areas = new Set();
+            data.forEach(row => {
+                let area = row['Area'] || row['Área'];
+                if (area && area.trim() !== '') areas.add(area.trim());
+            });
+            areas.forEach(area => {
+                const opt = document.createElement('option');
+                opt.value = area;
+                opt.innerText = area;
+                select.appendChild(opt);
+            });
+            if([...areas].includes(currentSelected)) select.value = currentSelected;
+        }
+
+        function processAndAggregateData(data, selectedMonth = 'all', selectedArea = 'all') {
+            const userMap = {};
+            const areaMap = {};
+
+            data.forEach(row => {
+                const nombre = row['Nombres (2)'];
+                const area = row['Area'] || row['Área'] || 'Sin Área';
+                const lineas = parseFloat(row['Lineas']) || 0;
+                let mes = row['mes'] || row['Mes'] || '';
+                mes = mes.trim();
+
+                if (!nombre || nombre.trim() === '') return;
+                
+                if (selectedMonth === 'all' || mes === selectedMonth) {
+                    if (!areaMap[area]) areaMap[area] = 0;
+                    areaMap[area] += lineas;
+                }
+
+                if (selectedMonth !== 'all' && mes !== selectedMonth) return;
+                if (selectedArea !== 'all' && area !== selectedArea) return;
+
+                if (!userMap[nombre]) userMap[nombre] = { name: nombre, area: area, mes: mes, lineas: 0 };
+                userMap[nombre].lineas += lineas;
+                userMap[nombre].mes = (selectedMonth === 'all') ? 'Anual' : mes;
+            });
+
+            let usersArray = Object.values(userMap).map(u => {
+                const totalArea = areaMap[u.area] || 1;
+                u.porcentaje = (u.lineas / totalArea) * 100;
+                return u;
+            });
+
+            return usersArray;
+        }
+
+        function parseData(matrix) {
+            let kpiPicked = 0, kpiRemaining = 0, kpiCompliance = 0;
+
+            for (let r = 0; r < matrix.length; r++) {
+                const row = matrix[r];
+                if (!row || row.length === 0) continue;
+                for (let c = 0; c < row.length; c++) {
+                    if (typeof row[c] === 'string') {
+                        const cellStr = row[c].trim().toUpperCase();
+                        if (cellStr.includes('FILAS PICK') && row[c+1] !== undefined) kpiPicked = parseFloat(row[c+1]) || 0;
+                        if (cellStr.includes('FILAS RESTANTES') && row[c+1] !== undefined) kpiRemaining = parseFloat(row[c+1]) || 0;
+                        if (cellStr.includes('CUMPLIMIENTO') && row[c+1] !== undefined) kpiCompliance = parseFloat(row[c+1]) || 0;
+                    }
+                }
+            }
+
+            rawData.kpis = { picked: kpiPicked, remaining: kpiRemaining, compliance: kpiCompliance };
+
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('dashboardContent').classList.remove('hidden');
+            document.getElementById('dashboardContent').classList.add('opacity-100');
+            document.getElementById('rightPanel').classList.remove('hidden');
+            document.getElementById('rightPanel').classList.add('opacity-100');
+            
+            triggerFilter();
+        }
+
+        function renderDashboard(filterTerm, selectedMonth = 'all', selectedArea = 'all') {
+            const aggregatedUsers = processAndAggregateData(initialUsersArray, selectedMonth, selectedArea);
+            
+            updateTop3Card(aggregatedUsers, selectedMonth);
+
+            const sortedForList = [...aggregatedUsers].sort((a, b) => {
+                if (a.area !== b.area) return a.area.localeCompare(b.area);
+                return b.lineas - a.lineas;
+            });
+
+            rawData.users = sortedForList;
+            const filteredUsers = rawData.users.filter(u => u.name.toLowerCase().includes(filterTerm) || u.area.toLowerCase().includes(filterTerm));
+            
+            updateKPIs(rawData.kpis);
+            updateCharts(rawData.kpis);
+            updateBarChart(selectedMonth, selectedArea);
+            updateRightList(filteredUsers);
+        }
+
+        function updateTop3Card(users, selectedMonth) {
+            const container = document.getElementById('kpi-top3-container');
+            const scopeLabel = document.getElementById('kpi-top3-scope');
+            
+            scopeLabel.innerText = selectedMonth === 'all' ? 'Rendimiento Anual' : `Mes: ${selectedMonth.toUpperCase()}`;
+
+            const topUsers = [...users].sort((a, b) => b.lineas - a.lineas).slice(0, 3);
+
+            if (topUsers.length === 0) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic">Sin registros</div>';
+                return;
+            }
+
+            const medals = ['🥇', '🥈', '🥉'];
+            container.innerHTML = topUsers.map((u, i) => `
+                <div class="flex items-center justify-between text-xs border-b border-slate-800/50 pb-1.5 pt-1 last:border-0">
+                    <span class="truncate pr-2 font-medium text-slate-300" title="${u.name}">
+                        <span class="mr-1">${medals[i]}</span> ${u.name}
+                    </span>
+                    <span class="text-[14.5px] font-bold text-accentCyan flex-shrink-0">${u.lineas.toLocaleString('es-ES')}</span>
+                </div>
+            `).join('');
+        }
+
+        function updateKPIs(kpis) {
+            const targetTotal = kpis.picked + kpis.remaining;
+            document.getElementById('kpi-target').innerText = targetTotal.toLocaleString('es-ES');
+            document.getElementById('kpi-picked').innerText = kpis.picked.toLocaleString('es-ES');
+            document.getElementById('kpi-remaining').innerText = kpis.remaining.toLocaleString('es-ES');
+            
+            let comp = kpis.compliance;
+            if (comp > 0 && comp <= 1) comp = comp * 100;
+            const compString = comp.toFixed(2) + '%';
+            
+            document.getElementById('kpi-compliance').innerText = compString;
+            document.getElementById('inner-doughnut-text').innerText = compString;
+        }
+
+        // FUNCIÓN MODIFICADA PARA FIJAR EXTRAER DESDE "FECHA 2" Y CONFIGURAR LABELS EN UTC
+        function updateBarChart(selectedMonth, selectedArea) {
+            const titleEl = document.getElementById('barChartTitle');
+            const subtitleEl = document.getElementById('barChartSubtitle');
+            const ctxBar = document.getElementById('barChart').getContext('2d');
+            
+            const groupCounts = {};
+
+            initialUsersArray.forEach(row => {
+                let mes = (row['mes'] || row['Mes'] || '').toString().trim();
+                let area = (row['Area'] || row['Área'] || '').toString().trim();
+                let lineas = parseFloat(row['Lineas']) || 0;
+
+                if (selectedMonth !== 'all' && mes !== selectedMonth) return;
+                if (selectedArea !== 'all' && area !== selectedArea) return;
+
+                let key = '';
+                if (selectedMonth === 'all') {
+                    key = mes || 'Sin Mes';
+                } else {
+                    let dayNum = null;
+                    // PRIORIDAD ABSOLUTA A LA COLUMNA "fecha 2" SOLICITADA
+                    let diaRaw = row['fecha 2'] || row['Fecha 2'] || row['dia'] || row['Dia'] || row['Día'] || row['fecha'] || row['Fecha'];
+                    
+                    if (diaRaw !== undefined && diaRaw !== null) {
+                        if (typeof diaRaw === 'number') {
+                            if (diaRaw >= 1 && diaRaw <= 31) {
+                                dayNum = diaRaw;
+                            } else {
+                                try {
+                                    let excelDate = new Date((diaRaw - 25569) * 86400 * 1000);
+                                    if (!isNaN(excelDate.getTime())) dayNum = excelDate.getUTCDate();
+                                } catch(e){}
+                            }
+                        } else {
+                            let str = diaRaw.toString().trim();
+                            let matches = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) || str.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+                            if (matches) {
+                                if (matches[1].length === 4) { 
+                                    dayNum = parseInt(matches[3]); 
+                                } else { 
+                                    dayNum = parseInt(matches[1]); 
+                                }
+                            } else {
+                                let simpleMatch = str.match(/\d+/);
+                                if (simpleMatch) dayNum = parseInt(simpleMatch[0]);
+                            }
+                        }
+                    }
+                    key = (dayNum && dayNum >= 1 && dayNum <= 31) ? dayNum.toString() : 'Sin Día';
+                }
+
+                if (key !== 'Sin Día') {
+                    if (!groupCounts[key]) groupCounts[key] = 0;
+                    groupCounts[key] += lineas;
+                }
+            });
+
+            let labels = Object.keys(groupCounts);
+            let chartLabels = [];
+
+            if (selectedMonth === 'all') {
+                const mesOrder = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+                labels.sort((a, b) => mesOrder.indexOf(a.toLowerCase()) - mesOrder.indexOf(b.toLowerCase()));
+                chartLabels = labels;
+                titleEl.innerText = "Producción Mensual de Picking";
+                subtitleEl.innerText = "Total acumulado de filas pickeadas por mes";
+            } else {
+                labels.sort((a, b) => parseInt(a) - parseInt(b));
+                
+                const mesOrder = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+                const monthIndex = mesOrder.indexOf(selectedMonth.toLowerCase());
+
+                chartLabels = labels.map(dayStr => {
+                    const dayNum = parseInt(dayStr);
+                    if (!isNaN(dayNum) && monthIndex !== -1) {
+                        // FORZAMOS LA CREACIÓN EN HORARIO UTC PARA EVITAR DESFASES LOCALES EN LAS ETIQUETAS
+                        const dateObj = new Date(Date.UTC(2026, monthIndex, dayNum));
+                        let dayNameShort = dateObj.toLocaleDateString('es-ES', { weekday: 'short', timeZone: 'UTC' });
+                        dayNameShort = dayNameShort.replace('.', '').substring(0, 3).toLowerCase();
+                        
+                        const paddedDayStr = dayNum.toString().padStart(2, '0');
+                        return [paddedDayStr, dayNameShort]; 
+                    }
+                    return dayStr;
+                });
+
+                titleEl.innerText = `Producción Diaria - ${selectedMonth.toUpperCase()}`;
+                subtitleEl.innerText = "Total acumulado de filas pickeadas por día";
+            }
+
+            const dataValues = labels.map(label => groupCounts[label]);
+            
+            const totalSum = dataValues.reduce((a, b) => a + b, 0);
+            document.getElementById('barChartTotalRows').innerText = totalSum.toLocaleString('es-ES');
+
+            if (barChartInstance) {
+                barChartInstance.data.labels = chartLabels;
+                barChartInstance.data.datasets[0].data = dataValues;
+                barChartInstance.update();
+            } else {
+                barChartInstance = new Chart(ctxBar, {
+                    type: 'bar',
+                    data: {
+                        labels: chartLabels,
+                        datasets: [{
+                            label: 'Total Filas',
+                            data: dataValues,
+                            backgroundColor: '#00f0ff',
+                            borderRadius: 6,
+                            borderSkipped: false,
+                            barPercentage: 0.5,        
+                            maxBarThickness: 16        
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                stacked: true,
+                                grid: { display: false },
+                                ticks: { 
+                                    color: '#94a3b8', 
+                                    font: { weight: '500', size: 10.5 },
+                                    maxRotation: 0,
+                                    autoSkip: false,
+                                    padding: 6
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                display: false,
+                                grid: { display: false },
+                                ticks: { display: false },
+                                grace: '28%'
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(27, 29, 71, 0.95)',
+                                bodyColor: '#f8fafc',
+                                padding: 12,
+                                displayColors: false
+                            }
+                        }
+                    },
+                    plugins: [{
+                        id: 'topLabelsPlugin',
+                        afterDatasetsDraw(chart) {
+                            const { ctx, data } = chart;
+                            ctx.save();
+                            ctx.font = 'bold 13px Roboto, sans-serif'; 
+                            ctx.fillStyle = '#ffffff'; 
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'bottom';
+                            
+                            chart.getDatasetMeta(0).data.forEach((bar, index) => {
+                                const value = data.datasets[0].data[index];
+                                if (value > 0) {
+                                    ctx.fillText(value.toLocaleString('es-ES'), bar.x, bar.y - 7);
+                                }
+                            });
+                            ctx.restore();
+                        }
+                    }]
+                });
+            }
+        }
+
+        function updateCharts(kpis) {
+            const ctxDoughnut = document.getElementById('doughnutChart').getContext('2d');
+            if (doughnutChartInstance) {
+                doughnutChartInstance.data.datasets[0].data = [kpis.picked, kpis.remaining];
+                doughnutChartInstance.update();
+            } else {
+                doughnutChartInstance = new Chart(ctxDoughnut, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Pickeadas', 'Restantes'],
+                        datasets: [{
+                            data: [kpis.picked, kpis.remaining],
+                            backgroundColor: ['#00f0ff', '#d946ef'],
+                            borderColor: '#1b1d47',
+                            borderWidth: 4, hoverOffset: 12
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, cutout: '80%', rotation: doughnutRotation,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { padding: 12, usePointStyle: true, pointStyle: 'circle' } },
+                            tooltip: { backgroundColor: 'rgba(27, 29, 71, 0.95)', bodyColor: '#f8fafc', padding: 12 }
+                        }
+                    }
+                });
+
+                if(doughnutAnimationInterval) clearInterval(doughnutAnimationInterval);
+                doughnutAnimationInterval = setInterval(() => {
+                    if (doughnutChartInstance) {
+                        doughnutRotation = (doughnutRotation + 0.4) % 360;
+                        doughnutChartInstance.options.rotation = doughnutRotation;
+                        doughnutChartInstance.update('none'); 
+                    }
+                }, 40);
+            }
+        }
+
+        function updateRightList(users) {
+            const listContainer = document.getElementById('materialsList');
+            if (autoScrollInterval) clearInterval(autoScrollInterval);
+            listContainer.innerHTML = ''; 
+
+            if (users.length === 0) {
+                listContainer.innerHTML = `<li class="text-slate-500 text-sm text-center mt-10">No se encontraron resultados</li>`;
+                return;
+            }
+
+            const buildListHTML = (usersData) => {
+                let html = '';
+                let lastArea = null;
+
+                usersData.forEach((user, index) => {
+                    const colorConfig = areaColorMapping[user.area] || { text: 'text-accentCyan', bg: 'bg-accentCyan/10', border: 'border-accentCyan/20', hex: '#00f0ff' };
+                    
+                    if (user.area !== lastArea) {
+                        lastArea = user.area;
+                        html += `
+                            <li class="pt-2 sticky top-0 bg-cardBg z-20">
+                                <div class="flex items-center justify-between px-2 py-1 rounded-md border ${colorConfig.border} ${colorConfig.bg}">
+                                    <span class="text-sm font-bold uppercase tracking-wider ${colorConfig.text}">${user.area}</span>
+                                    <span class="text-xs opacity-60 text-slate-300">Área</span>
+                                </div>
+                            </li>
+                        `;
+                    }
+
+                    const pctStr = user.porcentaje.toFixed(1) + '%';
+                    const isEven = index % 2 === 0;
+
+                    html += `
+                        <li class="flex justify-between items-center p-3 rounded-lg border border-transparent hover:border-slate-700 hover:bg-slate-700/30 transition-colors ${isEven ? 'bg-darkBg/30' : ''}">
+                            <div class="flex items-center gap-3 overflow-hidden w-[58%]">
+                                <div class="w-2 h-7 rounded-sm flex-shrink-0" style="background-color: ${colorConfig.hex}"></div>
+                                <div class="flex flex-col truncate">
+                                    <span class="text-base font-medium text-slate-200 truncate" title="${user.name}">${user.name}</span>
+                                    <span class="text-xs text-slate-400 truncate capitalize">${user.mes}</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end flex-shrink-0 w-[38%]">
+                                <span class="text-base font-bold" style="background-color: transparent; color: ${colorConfig.hex}">${user.lineas.toLocaleString('es-ES')}</span>
+                                <span class="text-[11px] text-slate-400 bg-darkBg px-1.5 py-0.5 rounded mt-0.5 whitespace-nowrap">${pctStr} del área</span>
+                            </div>
+                        </li>
+                    `;
+                });
+                return html;
+            };
+
+            const blockOriginal = buildListHTML(users);
+            const blockClonado = buildListHTML(users);
+
+            listContainer.innerHTML = blockOriginal + blockClonado;
+            startAutoScroll();
+        }
+
+        function startAutoScroll() {
+            const listContainer = document.getElementById('materialsList');
+            listContainer.scrollTop = 0; 
+            
+            setTimeout(() => {
+                const halfScrollHeight = listContainer.scrollHeight / 2;
+                if (halfScrollHeight > listContainer.clientHeight) {
+                    autoScrollInterval = setInterval(() => {
+                        if (isHoveringList) return; 
+                        listContainer.scrollTop += 1; 
+                        
+                        if (listContainer.scrollTop >= halfScrollHeight) {
+                            listContainer.scrollTop = 0; 
+                        }
+                    }, 35);
+                }
+            }, 400);
+        }
+    </script>
+</body>
+</html>
